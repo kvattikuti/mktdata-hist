@@ -51,15 +51,18 @@ func loadConfig() (*Config) {
 	return &conf
 }
 
-func generateRequestURLs(apiUrl string, yql string, symbols []Symbol, yearBegin int, yearEnd int) string {
-	for i := 0; i < len(symbols); i++ {
-		for year := yearEnd; year >= yearBegin; year-- {
-			//TODO: output URLs to a channel
-			//fmt.Printf("%s\n", formatRequestURL(apiUrl, yql, symbols[i].Sym, year))
-		} 
-	}
-
-	return ""
+func generateRequestURLs(apiUrl string, yql string, symbols []Symbol, yearBegin int, yearEnd int) <-chan string {
+	out := make(chan string)
+	go func() {
+		for i := 0; i < len(symbols); i++ {
+			for year := yearEnd; year >= yearBegin; year-- {
+				//TODO: output URLs to a channel
+				out <- fmt.Sprintf("%s\n", formatRequestURL(apiUrl, yql, symbols[i].Sym, year))
+			} 
+		}
+		close(out)
+    }()
+	return out
 }
 
 func formatRequestURL(apiUrl string, yql string, symbol string, year int) string {
@@ -110,7 +113,10 @@ func main() {
 	config := loadConfig()
 
 	// generate request URLs to concurrently pull down historical prices from yahoo.finance
-	generateRequestURLs(config.API_URL, config.YQL, config.Symbols, config.YearBeginning, config.YearEnding)
+	c := generateRequestURLs(config.API_URL, config.YQL, config.Symbols, config.YearBeginning, config.YearEnding)
+	for url := range c {
+		fmt.Printf("%s\n", url)
+	}
 
 	//TODO: use channel pipeline to process multiple requests 
 	requestUrl := formatRequestURL(config.API_URL, config.YQL, config.Symbols[0].Sym, config.YearEnding)
