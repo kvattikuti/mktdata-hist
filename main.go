@@ -6,6 +6,7 @@ import "fmt"
 import "net/http"
 import "net/url"
 import "strings"
+import "sync"
 
 type Response struct {
 	Query struct {
@@ -57,7 +58,7 @@ func generateRequestURLs(apiUrl string, yql string, symbols []Symbol, yearBegin 
 		for i := 0; i < len(symbols); i++ {
 			for year := yearEnd; year >= yearBegin; year-- {
 				//TODO: output URLs to a channel
-				out <- fmt.Sprintf("%s\n", formatRequestURL(apiUrl, yql, symbols[i].Sym, year))
+				out <- fmt.Sprintf("%s", formatRequestURL(apiUrl, yql, symbols[i].Sym, year))
 			} 
 		}
 		close(out)
@@ -79,32 +80,78 @@ func formatRequestURL(apiUrl string, yql string, symbol string, year int) string
 	return apiUrl + reqParamsStringEncoded
 }
 
-func getResponseBody(requestURL string) []byte {
+func getResponseBody(requestURLs <- chan string) <-chan []byte {
 
 	//TODO: don't like error handling, is there a better way?
-	resp, err := http.Get(requestURL)
-	if err != nil {
-		return nil
-	}
-	defer resp.Body.Close()
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return nil
-	}
-	return body
+	out := make(chan []byte)
+	go func() {
+		for url := range requestURLs {
+			fmt.Printf("%s\n", url)
+			resp, err := http.Get(url)
+			if err != nil {
+				fmt.Printf("%s", err)
+				out <- nil
+			}
+			defer resp.Body.Close()
+			body, err := ioutil.ReadAll(resp.Body)
+			if err != nil {
+				out <- nil
+			}
+			out <- body
+		}
+		close(out)
+	}()
+	return out
 }
 
-func parseResponse(responseBody []byte) (* Response) {
-	res := Response{}
-	if err := json.Unmarshal(responseBody, &res); err != nil {
-		return nil
-	}
-	return &res
+func parseResponse(in <- chan []byte) <- chan (* Response) {
+	out := make(chan (* Response))
+	go func() {
+		for responseBody := range in {
+			res := Response{}
+			if err := json.Unmarshal(responseBody, &res); err != nil {
+				out <- nil
+			}
+			out <- &res
+		}
+		close(out)
+	}()
+	return out
 }
 
-func saveDailyQuotes(response *Response) {
+func saveDailyQuotes(in <- chan (*Response)) {
 	//TODO: write to database
-	fmt.Printf("Total daily ticks for %s : %d\n", response.Query.Results.DailyTicks[0].Symbol, len(response.Query.Results.DailyTicks))
+	for res := range in {
+		if len(res.Query.Results.DailyTicks) > 0 {
+			fmt.Printf("Total daily ticks for %s : %d\n", res.Query.Results.DailyTicks[0].Symbol, len(res.Query.Results.DailyTicks))
+		}
+	}
+}
+
+func merge(cs ...<-chan []byte) <-chan []byte {
+    var wg sync.WaitGroup
+    out := make(chan []byte)
+
+    // Start an output goroutine for each input channel in cs.  output
+    // copies values from c to out until c is closed, then calls wg.Done.
+    output := func(c <-chan []byte) {
+        for n := range c {
+            out <- n
+        }
+        wg.Done()
+    }
+    wg.Add(len(cs))
+    for _, c := range cs {
+        go output(c)
+    }
+
+    // Start a goroutine to close out once all the output goroutines are
+    // done.  This must start after the wg.Add call.
+    go func() {
+        wg.Wait()
+        close(out)
+    }()
+    return out
 }
 
 func main() {
@@ -113,16 +160,41 @@ func main() {
 	config := loadConfig()
 
 	// generate request URLs to concurrently pull down historical prices from yahoo.finance
-	c := generateRequestURLs(config.API_URL, config.YQL, config.Symbols, config.YearBeginning, config.YearEnding)
-	for url := range c {
-		fmt.Printf("%s\n", url)
-	}
+	in := generateRequestURLs(config.API_URL, config.YQL, config.Symbols, config.YearBeginning, config.YearEnding)
 
-	//TODO: use channel pipeline to process multiple requests 
-	requestUrl := formatRequestURL(config.API_URL, config.YQL, config.Symbols[0].Sym, config.YearEnding)
-	body := getResponseBody(requestUrl)
-	response := parseResponse(body)
-	saveDailyQuotes(response)
+	//distribute http calls across several routines
+	r := merge(getResponseBody(in),
+		getResponseBody(in),
+		getResponseBody(in),
+		getResponseBody(in),
+		getResponseBody(in),
+		getResponseBody(in),
+		getResponseBody(in),
+		getResponseBody(in),
+		getResponseBody(in),
+		getResponseBody(in),
+		getResponseBody(in),
+		getResponseBody(in),
+		getResponseBody(in),
+		getResponseBody(in),
+		getResponseBody(in),
+		getResponseBody(in),
+		getResponseBody(in),
+		getResponseBody(in),
+		getResponseBody(in),
+		getResponseBody(in),
+		getResponseBody(in),
+		getResponseBody(in),
+		getResponseBody(in),
+		getResponseBody(in),
+		getResponseBody(in),
+		getResponseBody(in),
+		getResponseBody(in),
+		getResponseBody(in))
+
+	p := parseResponse(r)
+	saveDailyQuotes(p)
 
 }
+
 
