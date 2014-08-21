@@ -5,5 +5,7 @@
 	"year_beginning": 1970,
 	"symbols": [
 		{ "symbol": "YHOO" },
-		{ "symbol": "AAPL" }]
+		{ "symbol": "AAPL" }],
+	"database_driver": "postgres",
+	"database_url": "dbname=mktdatahst sslmode=disable"
 }
