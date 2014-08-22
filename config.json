@@ -1,8 +1,8 @@
 {
 	"api_url": "https://query.yahooapis.com/v1/public/yql?",
-	"yql": "select * from yahoo.finance.historicaldata where symbol='%s' and startDate = '%d-01-01' and endDate = '%d-12-31'",
-	"year_ending": 2013,
-	"year_beginning": 1970,
+	"yql": "select * from yahoo.finance.historicaldata where symbol='%s' and startDate = '%d-%02d-%02d' and endDate = '%d-%02d-%02d'",
+	"year_ending": 2014,
+	"year_beginning": 2000,
 	"symbols": [
 		{ "symbol": "YHOO" },
 		{ "symbol": "AAPL" }],
