@@ -8,8 +8,8 @@ import "net/url"
 import "strings"
 import "sync"
 import (
-	"github.com/lib/pq"
 	"database/sql"
+	"github.com/lib/pq"
 )
 import "strconv"
 import "time"
@@ -59,27 +59,39 @@ func loadConfig() *Config {
 	return &conf
 }
 
-func generateRequestURLs(apiUrl string, yql string, symbols []Symbol, yearBegin int, yearEnd int, pastYearStmt *sql.Stmt, currYearStmt *sql.Stmt) <-chan string {
+func generateRequestURLs(apiUrl string, yql string, symbols []Symbol, yearBegin int, yearEnd int,
+	pastYearStmt *sql.Stmt, currYearStmt *sql.Stmt) <-chan string {
 	out := make(chan string)
 	go func() {
+		today := time.Now()
 		for i := 0; i < len(symbols); i++ {
-			for year := yearEnd; year >= yearBegin; year-- {
-				today := time.Now()
+			for year := yearBegin; year <= yearEnd ; year++ {
 				if year == today.Year() {
-					nextHstDt := getNextHstDateForCurrentYear(currYearStmt, symbols[i].Sym)
+					nextHstDt := getNextHstDate(currYearStmt, symbols[i].Sym, today.Year())
 					if nextHstDt.Day() < today.Day() {
-						fmt.Printf("Preparing API call for current year, getting historical quotes for %s since %d-%d-%d\n", symbols[i].Sym, 
-							nextHstDt.Year(), int(nextHstDt.Month()), nextHstDt.Day())
-						out <- fmt.Sprintf("%s", formatRequestURL(apiUrl, yql, symbols[i].Sym, year, int(nextHstDt.Month()), nextHstDt.Day(), 
-							int(today.Month()), today.Day()))
-						} else {
-							fmt.Printf("Skipping API call, historical quotes for %s exist for the year %d\n", symbols[i].Sym, year)
-						}
+						fmt.Printf("Preparing API call for current year, getting historical quotes for %s since %d-%d-%d\n",
+							symbols[i].Sym, nextHstDt.Year(), int(nextHstDt.Month()), nextHstDt.Day())
+						out <- formatRequestURL(apiUrl, yql, symbols[i].Sym, nextHstDt.Year(), int(nextHstDt.Month()),
+							nextHstDt.Day(), int(today.Month()), today.Day())
+					} else {
+						fmt.Printf("Skipping API call, historical quotes for %s exist for the year %d\n",
+							symbols[i].Sym, year)
+					}
 				} else if !quotesExistForPastYear(pastYearStmt, symbols[i].Sym, year) {
-					fmt.Printf("Preparing API call, historical quotes for %s exist for the year %d\n", symbols[i].Sym, year)
-					out <- fmt.Sprintf("%s", formatRequestURL(apiUrl, yql, symbols[i].Sym, year, 1, 1, 12, 31))
+					fmt.Printf("Preparing API call, historical quotes for %s exist for the year %d\n",
+						symbols[i].Sym, year)
+					out <- formatRequestURL(apiUrl, yql, symbols[i].Sym, year, 1, 1, 12, 31)
 				} else {
-					fmt.Printf("Skipping API call, historical quotes for %s exist for the year %d\n", symbols[i].Sym, year)
+					nextHstDt := getNextHstDate(currYearStmt, symbols[i].Sym, year)
+					if nextHstDt.Day() < 31 && nextHstDt.Year() == year {
+						fmt.Printf("Preparing API call for the year %d, getting historical quotes for %s since %d-%d-%d\n",
+							year, symbols[i].Sym, nextHstDt.Year(), int(nextHstDt.Month()), nextHstDt.Day())
+						out <- formatRequestURL(apiUrl, yql, symbols[i].Sym, nextHstDt.Year(), int(nextHstDt.Month()),
+							nextHstDt.Day(), int(today.Month()), today.Day())
+					} else {
+						fmt.Printf("Skipping API call, historical quotes for %s exist for the year %d\n",
+							symbols[i].Sym, year)
+					}
 				}
 			}
 		}
@@ -106,25 +118,25 @@ func formatRequestURL(apiUrl string, yql string, symbol string, year int, startM
 }
 
 func quotesExistForPastYear(stmt *sql.Stmt, symbol string, year int) bool {
-	start_dt := strings.Join([]string{ strconv.Itoa(year), "01", "01"}, "-")
-	end_dt := strings.Join([]string{ strconv.Itoa(year), "12", "31"}, "-")
+
+	start_dt := strings.Join([]string{strconv.Itoa(year), "01", "01"}, "-")
+	end_dt := strings.Join([]string{strconv.Itoa(year), "12", "31"}, "-")
 	rows, err := stmt.Query(symbol, start_dt, end_dt)
 	defer rows.Close()
 	if err != nil {
 		fmt.Printf("error running select query for symbol and year %s\n", err.Error())
 		return false
 	}
-	return rows.Next() 
+	return rows.Next()
 }
 
-func getNextHstDateForCurrentYear(stmt *sql.Stmt, symbol string) time.Time {
-	today := time.Now()
-	start_dt := strings.Join([]string{ strconv.Itoa(today.Year()), "01", "01"}, "-")
+func getNextHstDate(stmt *sql.Stmt, symbol string, year int) time.Time {
+
+	start_dt := strings.Join([]string{strconv.Itoa(year), "01", "01"}, "-")
 	var nextHstDt time.Time
 	err := stmt.QueryRow(symbol, start_dt).Scan(&nextHstDt)
-	if err != nil { 
-		fmt.Printf("error running select query for symbol and year %s\n", err.Error())
-		return time.Date(today.Year(), 1, 1, 0, 0, 0, 0, time.UTC)
+	if err != nil {
+		return time.Date(year, 1, 1, 0, 0, 0, 0, time.UTC)
 	}
 	return nextHstDt
 }
@@ -135,7 +147,7 @@ func getResponseBody(requestURLs <-chan string) <-chan []byte {
 	out := make(chan []byte)
 	go func() {
 		for url := range requestURLs {
-			//fmt.Printf("%s\n", url)
+			fmt.Printf("%s\n", url)
 			resp, err := http.Get(url)
 			if err != nil {
 				fmt.Printf("%s", err)
@@ -170,7 +182,7 @@ func parseResponse(in <-chan []byte) <-chan (*Response) {
 
 func saveDailyQuotes(in <-chan (*Response), db *sql.DB) {
 	for res := range in {
-		if len(res.Query.Results.DailyTicks) > 0 {
+		if res != nil && len(res.Query.Results.DailyTicks) > 0 {
 			fmt.Printf("Saving quotes for %s...\n", res.Query.Results.DailyTicks[0].Symbol)
 			tx, err := db.Begin()
 			if err != nil {
@@ -208,7 +220,7 @@ func saveDailyQuotes(in <-chan (*Response), db *sql.DB) {
 				return
 			}
 			fmt.Printf("Total daily ticks for %s : %d\n", res.Query.Results.DailyTicks[0].Symbol, len(res.Query.Results.DailyTicks))
-		} 
+		}
 	}
 }
 
