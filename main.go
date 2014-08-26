@@ -59,6 +59,7 @@ func loadConfig() *Config {
 	return &conf
 }
 
+// Known bug: When run on new year, logic will skip getting quotes for last day of the past year
 func generateRequestURLs(apiUrl string, yql string, symbols []Symbol, yearBegin int, yearEnd int,
 	pastYearStmt *sql.Stmt, currYearStmt *sql.Stmt) <-chan string {
 	out := make(chan string)
@@ -147,7 +148,8 @@ func getResponseBody(requestURLs <-chan string) <-chan []byte {
 	out := make(chan []byte)
 	go func() {
 		for url := range requestURLs {
-			fmt.Printf("%s\n", url)
+			//Uncomment to print the URL to get market data
+			//fmt.Printf("%s\n", url)
 			resp, err := http.Get(url)
 			if err != nil {
 				fmt.Printf("%s", err)
